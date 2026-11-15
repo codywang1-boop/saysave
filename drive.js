@@ -56,6 +56,11 @@
       return this.data.files.filter(f => f.parentId === folderId).length + this.data.folders.filter(f => f.parentId === folderId).length;
     }
     filesIn(folderId) { return this.data.files.filter(f => f.parentId === folderId); }
+    async findSimilar(words) {
+      const out = {}; if (!words || !words.length) return out;
+      for (const f of this.data.files) { const n = f.name.toLowerCase(); if (f.parentId !== 'root' && words.some(w => n.includes(w))) out[f.parentId] = (out[f.parentId] || 0) + 1; }
+      return out;
+    }
     folderLink() { return null; }
   }
 
@@ -199,6 +204,15 @@
       const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
       const j = await this.api(`/files?q=${q}&fields=files(id)&pageSize=2`);
       return j.files.length;
+    }
+    // Where do files with similar names already live? Returns {folderId: count}
+    async findSimilar(words) {
+      const out = {}; if (!words || !words.length) return out;
+      const terms = words.map(w => `name contains '${w.replace(/['\\]/g, '')}'`).join(' or ');
+      const q = encodeURIComponent(`(${terms}) and mimeType!='${FOLDER}' and trashed=false`);
+      const j = await this.api(`/files?q=${q}&fields=files(parents)&pageSize=50&spaces=drive`);
+      for (const f of j.files || []) for (const p of (f.parents || [])) out[p] = (out[p] || 0) + 1;
+      return out;
     }
     folderLink(id) { return 'https://drive.google.com/drive/folders/' + id; }
   }

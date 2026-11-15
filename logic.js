@@ -28,6 +28,9 @@
     { id: 'work', name: 'Work', yearly: false,
       keywords: ['paystub', 'pay stub', 'payslip', 'paycheck', 'offer letter', 'resume', 'cv', 'contract', 'timesheet', 'time sheet', 'employment', 'employer', 'benefits enrollment', 'performance review', 'onboarding'],
       folderWords: ['work', 'job', 'jobs', 'career', 'employment', 'business'] },
+    { id: 'training', name: 'Training & Certificates', yearly: false,
+      keywords: ['training', 'trainings', 'certificate', 'certificates', 'certification', 'certifications', 'certified', 'cpr', 'first aid', 'aed', 'course', 'completion', 'ceu', 'ce credits', 'continuing education', 'diploma', 'transcript', 'license renewal', 'orientation', 'webinar', 'workshop'],
+      folderWords: ['training', 'trainings', 'certificates', 'certifications', 'certification', 'diploma', 'transcripts', 'courses'] },
     { id: 'school', name: 'School', yearly: false,
       keywords: ['school', 'report card', 'transcript', 'homework', 'class', 'syllabus', 'tuition', 'enrollment', 'teacher', 'grades', 'diploma', 'college', 'university', 'permission slip', 'field trip'],
       folderWords: ['school', 'education', 'kids school', 'college', 'university'] },
@@ -39,7 +42,7 @@
       folderWords: ['car', 'cars', 'auto', 'vehicle', 'vehicles'] },
     { id: 'id', name: 'ID & Legal', yearly: false,
       keywords: ['passport', 'license', 'drivers license', 'birth certificate', 'social security', 'marriage certificate', 'will', 'trust', 'legal', 'court', 'notary', 'notarized', 'power of attorney', 'id card', 'citizenship'],
-      folderWords: ['id', 'ids', 'legal', 'identity', 'documents', 'important documents', 'personal documents'] },
+      folderWords: ['id', 'ids', 'legal', 'identity', 'important documents', 'personal documents', 'passport', 'license'] },
     { id: 'photos', name: 'Photos & Scans', yearly: true,
       keywords: [],
       folderWords: ['photos', 'pictures', 'images', 'scans'] }
@@ -141,7 +144,13 @@
   }
 
   // Score how well a folder fits
-  function scoreFolder(folder, fileToks, category) {
+  const stem = w => w.replace(/(ings|ing|ies|es|s)$/, '');
+  function isJunkFolder(name) {
+    const n = String(name || '').trim();
+    return /^[0-9a-f]{16,}$/i.test(n) || /_\d{8,}/.test(n) || /^(takeout|temp|tmp|logs?|testruns|verification|archive|archived)$/i.test(n);
+  }
+  function scoreFolder(folder, fileToks, category, similar) {
+    if (isJunkFolder(folder.name) || (folder.path || []).some(isJunkFolder)) return -99;
     const nameN = normalize(folder.name);
     const fTok = tokens(folder.name).filter(t => !STOP.has(t));
     let score = 0;
@@ -150,13 +159,20 @@
         const wn = normalize(w);
         if (nameN === wn) score = Math.max(score, 10);
         else if ((' ' + nameN + ' ').indexOf(' ' + wn + ' ') !== -1) score = Math.max(score, 7);
+        else if (wn.indexOf(' ') === -1 && fTok.some(t => stem(t) === stem(wn))) score = Math.max(score, 7);
       }
       if (normalize(category.name) === nameN) score = Math.max(score, 10);
     }
     // direct word overlap between file name and folder name (e.g. "Honda" folder)
     let overlap = 0;
-    for (const t of fTok) if (t.length >= 3 && !/^\d+$/.test(t) && fileToks.includes(t)) overlap++;
-    score += overlap * 6;
+    const fileStems = fileToks.map(stem);
+    for (const t of fTok) if (t.length >= 3 && !/^\d+$/.test(t) && fileStems.includes(stem(t))) overlap++;
+    score += overlap * 8;
+    // words that match a parent folder count a little (e.g. Nathaniel › timesheets)
+    const anc = (folder.path || []).slice(0, -1).join(' ');
+    if (anc) { const at = tokens(anc).filter(t => t.length >= 3 && !STOP.has(t) && !/^\d+$/.test(t)); for (const t of at) if (fileStems.includes(stem(t))) score += 4; }
+    // files with similar names already live here
+    if (similar && similar[folder.id]) score += Math.min(12, similar[folder.id] * 5);
     // prefer shallower folders a little
     score -= Math.max(0, (folder.depth || 1) - 1) * 0.5;
     return score;
@@ -204,12 +220,17 @@
     }
 
     const scored = index.list
-      .map(f => ({ folder: f, score: scoreFolder(f, fileToks, category) }))
+      .map(f => ({ folder: f, score: scoreFolder(f, fileToks, category, opts.similar) }))
       .filter(s => s.score >= 5)
       .sort((a, b) => b.score - a.score);
 
     if (scored.length) {
-      const top = scored.slice(0, 3).map(s => ({ ...withYear(index, s.folder, year, category), score: s.score }));
+      const seen = new Set(); const top = [];
+      for (const sc of scored) {
+        const c = { ...withYear(index, sc.folder, year, category), score: sc.score };
+        const k = c.path.join('/').toLowerCase(); if (seen.has(k)) continue; seen.add(k); top.push(c);
+        if (top.length === 3) break;
+      }
       const conf = scored[0].score >= 9.5 && (!scored[1] || scored[0].score - scored[1].score >= 2) ? 'high' : 'medium';
       // if a year subfolder is missing for yearly category, propose it inside the matched folder
       let proposal = null;
@@ -336,7 +357,12 @@
          .replace(/\{month\}/gi, String(d.getMonth() + 1).padStart(2, '0')));
   }
 
-  const api = { CATEGORIES, normalize, tokens, findYear, isMeaninglessName, classify, buildIndex,
+  // distinctive words of a file name, for searching similar files in Drive
+  function keyWords(name) {
+    const base = splitExt(name).base;
+    return contentTokens(base).filter(t => t.length >= 4 && !/^\d+$/.test(t)).slice(0, 3);
+  }
+  const api = { keyWords, isJunkFolder, CATEGORIES, normalize, tokens, findYear, isMeaninglessName, classify, buildIndex,
     suggest, parseCommand, searchFolders, expandPath, cleanName, similarity, splitExt };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SaySaveLogic = api;

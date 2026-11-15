@@ -14,7 +14,7 @@
     shortcuts: [{ phrase: 'tax folder', path: 'Taxes/{year}', skip: false }],
     confirmWords: 'yes, ok, okay, yeah, sure, do it, save it, confirm',
     cancelWords: 'cancel, no, stop, never mind',
-    rename: true, autoCreate: false, autoListen: true, speak: false, readContent: true, homePath: ''
+    rename: true, autoCreate: false, autoListen: true, speak: false, readContent: true, autoSuggest: true, homePath: ''
   };
   let S = Object.assign({}, DEFAULTS, D.store('saysave.settings') || {});
   if (!S.clientId) S.clientId = DEFAULTS.clientId;
@@ -25,9 +25,15 @@
   let orgLog = D.store('saysave.orgLog') || null;
   const saveRecent = () => D.store('saysave.recent', recent.slice(0, 30));
 
+  // one Google client, loaded at startup so the sign-in popup opens instantly on tap
+  let gdrive = new D.GoogleDrive(S.clientId);
+  if (S.clientId && !D.inPreview()) gdrive.init().catch(() => {});
   let drive = makeDrive();
-  function makeDrive() { return S.mode === 'google' ? new D.GoogleDrive(S.clientId) : new D.DemoDrive(); }
-  if (!drive.isDemo && S.clientId && !D.inPreview()) drive.init().catch(() => {});
+  function makeDrive() {
+    if (S.mode !== 'google') return new D.DemoDrive();
+    if (gdrive.clientId !== S.clientId) { gdrive = new D.GoogleDrive(S.clientId); if (S.clientId && !D.inPreview()) gdrive.init().catch(() => {}); }
+    return gdrive;
+  }
 
   const cmdSettings = () => ({ triggers: S.triggers, shortcuts: S.shortcuts, confirmWords: list(S.confirmWords), cancelWords: list(S.cancelWords) });
 
@@ -137,7 +143,7 @@
     const v = $('#view');
     const needConnect = !drive.isDemo && !drive.isConnected();
     v.innerHTML = `
-      ${drive.isDemo ? `<div class="banner"><div>🧪</div><div><b>Demo mode.</b> Files are saved to a pretend Drive inside this browser so you can try everything. Connect your real Google Drive in <a href="#" data-go="setup">Settings</a>.</div></div>` : ''}
+      ${drive.isDemo ? `<div class="banner"><div>🧪</div><div class="grow"><b>Demo mode — practice only.</b> Files go to a pretend Drive, not your real one.<div style="margin-top:8px"><button class="btn sm" id="useGoogle">Connect my Google Drive</button></div></div></div>` : ''}
       ${needConnect ? `<div class="banner"><div>🔗</div><div class="grow"><b>Google Drive isn't connected yet.</b></div><button class="btn sm" id="connectNow">Connect</button></div>` : ''}
       <section class="card hero">
         <button class="mic" id="heroMic" aria-label="Choose a file, then speak">${ICON.mic}</button>
@@ -155,6 +161,7 @@
         : '<div class="empty">Nothing filed yet. Your saved files will show up here with an Undo button.</div>'}</section>`;
     $$('[data-go]', v).forEach(a => a.onclick = e => { e.preventDefault(); go(a.dataset.go); });
     const cn = $('#connectNow', v); if (cn) cn.onclick = connectGoogle;
+    const ug = $('#useGoogle', v); if (ug) ug.onclick = () => { S.mode = 'google'; saveS(); drive = makeDrive(); connectGoogle(); };
     $('#chooseFile', v).onclick = () => { warmToken(); $('#filePick').click(); };
     $('#heroMic', v).onclick = () => { warmToken(); $('#filePick').click(); };
     const drop = $('#drop', v);
@@ -272,6 +279,7 @@
       try {
         const index = await getIndex();
         const text2 = await getText();
+        if (cmd.type === 'auto' && !st.similar) st.similar = await drive.findSimilar(L.keyWords(file.name)).catch(() => ({}));
         if (cmd.type === 'auto') st.plan = planAuto(index, text2);
         else if (cmd.type === 'shortcut') st.plan = planShortcut(index, cmd.shortcut, text2);
         else if (cmd.type === 'folder') st.plan = planFolder(index, cmd.query, text2);
@@ -305,9 +313,9 @@
       return { path: full, parentId, newSegments: full.slice(i) };
     }
     function planAuto(index, text) {
-      const s = L.suggest(index, { name: file.name, text, mimeType: file.type }, { rules });
+      const s = L.suggest(index, { name: file.name, text, mimeType: file.type }, { rules, similar: st.similar });
       const reason = s.usedContent ? 'The file name was unclear, so I read the document.' :
-        s.category ? `Looks like <b>${esc(s.category)}</b>${s.year ? ' from ' + s.year : ''}, based on the file name.` : 'I couldn\'t tell what this is from the name.';
+        s.category ? `Looks like <b>${esc(s.category)}</b>${s.year && (L.CATEGORIES.find(c => c.id === s.categoryId) || {}).yearly ? ' from ' + s.year : ''}, based on the file name.` : 'I couldn\'t tell what this is from the name.';
       if (s.confidence === 'none') {
         const p = resolveNew(index, s.proposal.path);
         return { kind: 'new', auto: true, proposal: p, editPath: p.path.join('/'), name: baseName(s.suggestedName), reason, categoryId: s.categoryId, top: null };
@@ -352,7 +360,8 @@
           <label class="field">New folder (use / for subfolders)<input type="text" id="newPath" value="${esc(p.editPath)}"></label>`;
       } else {
         const c = p.choices;
-        where = `<div class="muted small" style="margin:14px 0 8px">${p.reason || ''}</div>` +
+        where = (p.suggested ? `<div style="margin:14px 0 2px;font-weight:700">${c.length > 1 ? 'Suggested folders' : 'Suggested folder'}</div>` : '') +
+          `<div class="muted small" style="margin:${p.suggested ? '0' : '14px'} 0 8px">${p.reason || ''}${p.suggested ? ' Not right? Say another folder, or tap Change folder.' : ''}</div>` +
           (c.length > 1 ? c.map((x, i) => `<button class="choice ${i === p.sel ? 'sel' : ''}" data-sel="${i}"><input type="radio" ${i === p.sel ? 'checked' : ''} tabindex="-1">${pathHtml(x.path)}</button>`).join('')
             : pathHtml(c[0].path)) +
           (p.yearProposal ? `<button class="btn ghost sm" data-a="yearSub" style="margin-top:6px">+ Put it in a new “${esc(p.yearProposal.newSegments[0])}” subfolder</button>` : '');
@@ -421,7 +430,7 @@
         if (p.categoryId && (p.manual || p.sel > 0) && p.top) learn(p.categoryId, path);
         recent.unshift({ id: up.id, name: fname, type: file.type, path, folderId, link: up.link || null, time: Date.now(), created, mode: drive.isDemo ? 'demo' : 'google' });
         saveRecent();
-        toast(`✅ Saved to <b>${esc(path.length ? path.slice(-2).join(' › ') : 'My Drive')}</b>`, [
+        toast(`✅ Saved to <b>${drive.isDemo ? 'Demo Drive › ' : ''}${esc(path.length ? path.slice(-2).join(' › ') : 'My Drive')}</b>${drive.isDemo ? ' <span class="muted">(practice only — not your real Drive)</span>' : ''}`, [
           ...(drive.folderLink(folderId) ? [{ label: 'Open', href: drive.folderLink(folderId) }] : []),
           { label: 'Undo', onClick: () => undoSave(recent.findIndex(r => r.id === up.id)) }
         ]);
@@ -430,8 +439,23 @@
       } catch (e) { st.saving = false; st.msg = '⚠️ ' + esc(e.message || e); draw(); }
     }
 
+    async function autoSuggest() {
+      st.msg = '<span class="spinner" style="display:inline-block;vertical-align:middle"></span> Looking through your Drive for the right folder…'; draw();
+      try {
+        const index = await getIndex();
+        const text = await getText();
+        st.similar = await drive.findSimilar(L.keyWords(file.name)).catch(() => ({}));
+        if (!box.isConnected || st.plan) return;
+        st.plan = planAuto(index, text); st.plan.suggested = true; st.msg = '';
+        draw();
+        say(st.plan.kind === 'new' ? 'No matching folder. Create one?' : 'Save to ' + (st.plan.choices[0].path.slice(-1)[0] || 'My Drive') + '?');
+        if (S.autoListen && SR) setTimeout(() => { if (st.plan && !st.saving && box.isConnected) startListening(true); }, S.speak ? 1800 : 300);
+      } catch (e) { st.msg = '⚠️ ' + esc(e.message || e); draw(); if (S.autoListen && SR) startListening(); }
+    }
+
     draw();
-    if (S.autoListen && SR) startListening();
+    if (S.autoSuggest && (drive.isDemo || drive.isConnected())) autoSuggest();
+    else if (S.autoListen && SR) startListening();
   }
 
   async function ensurePath(index, segs) {
@@ -748,6 +772,7 @@
       <h2>Behavior</h2>
       <section class="card">
         ${[['rename', 'Suggest clean file names', 'e.g. scan_0012.pdf → Insurance 2025-11-15.pdf'],
+           ['autoSuggest', 'Suggest a folder as soon as a file arrives', 'SaySave checks your Drive and proposes a path right away'],
            ['readContent', 'Read the document when the name is unclear', 'Reads PDFs/text on your phone only'],
            ['autoListen', 'Start listening automatically', 'Mic turns on when a file arrives'],
            ['speak', 'Speak confirmations out loud', '“Saved to Taxes”'],
@@ -772,11 +797,10 @@
     $$('[data-mode]', v).forEach(b => b.onclick = () => {
       if (S.mode === b.dataset.mode) return;
       S.mode = b.dataset.mode; saveS(); drive = makeDrive(); orgPlan = null;
-      if (!drive.isDemo && S.clientId) drive.init().catch(() => {});
       render();
     });
     const cid = $('#cid', v);
-    if (cid) cid.onchange = () => { S.clientId = cid.value.trim(); saveS(); drive = makeDrive(); if (S.clientId) drive.init().catch(e => errToast(e)); render(); };
+    if (cid) cid.onchange = () => { S.clientId = cid.value.trim(); saveS(); drive = makeDrive(); render(); };
     const conn = $('#conn', v); if (conn) conn.onclick = connectGoogle;
     const disc = $('#disc', v); if (disc) disc.onclick = () => { drive.disconnect(); render(); };
     $$('[data-opt]', v).forEach(c => c.onchange = () => { S[c.dataset.opt] = c.checked; saveS(); });
