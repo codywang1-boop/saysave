@@ -168,7 +168,8 @@
     const needConnect = !drive.isDemo && !drive.isConnected();
     v.innerHTML = `
       ${drive.isDemo ? `<div class="banner"><div>🧪</div><div class="grow"><b>Demo mode — practice only.</b> Files go to a pretend Drive, not your real one.<div style="margin-top:8px"><button class="btn sm" id="useGoogle">Connect my Google Drive</button></div></div></div>` : ''}
-      ${needConnect ? `<div class="banner"><div>🔗</div><div class="grow"><b>Google Drive isn't connected yet.</b></div><button class="btn sm" id="connectNow">Connect</button></div>` : ''}
+      ${needConnect ? `<div class="banner"><div>🔗</div><div class="grow"><b>Google Drive isn't connected yet.</b><div class="small muted">Tap Connect and choose your Google account. Just looking around? Try the practice Demo Drive.</div>
+        <div class="row" style="margin-top:8px"><button class="btn sm" id="connectNow">Connect</button><button class="btn ghost sm" id="useDemo">Try Demo</button></div></div></div>` : ''}
       <section class="card hero">
         <button class="mic" id="heroMic" aria-label="Choose a file, then speak">${ICON.mic}</button>
         <h1>Scan or pick. Say where.</h1>
@@ -194,6 +195,7 @@
         : '<div class="empty">Nothing filed yet. Your saved files will show up here with an Undo button.</div>'}</section>`;
     $$('[data-go]', v).forEach(a => a.onclick = e => { e.preventDefault(); go(a.dataset.go); });
     const cn = $('#connectNow', v); if (cn) cn.onclick = connectGoogle;
+    const ud = $('#useDemo', v); if (ud) ud.onclick = () => { S.mode = 'demo'; saveS(); drive = makeDrive(); render(); };
     const ug = $('#useGoogle', v); if (ug) ug.onclick = () => { S.mode = 'google'; saveS(); drive = makeDrive(); connectGoogle(); };
     $('#chooseFile', v).onclick = () => { warmToken(); $('#filePick').click(); };
     $('#scanDoc', v).onclick = () => { warmToken(); openScanner(); };
@@ -882,7 +884,12 @@
     if (S.mode !== 'google') { S.mode = 'google'; saveS(); drive = makeDrive(); }
     if (!S.clientId && !NATIVE) { go('setup'); return errToast('Paste your Google OAuth Client ID first.'); }
     try { if (!drive.client) await drive.init(); await drive.connect(); toast('✅ Connected to Google Drive as ' + esc(drive.account())); render(); }
-    catch (e) { errToast(e); }
+    catch (e) {
+      const m = String(e && e.message || e);
+      if (/access_denied|not.*(verified|test)|403|blocked|developer/i.test(m)) toast('⚠️ Google didn\'t allow this account yet. SaySave is in testing, so only invited accounts can connect. You can still try everything in <b>Demo Drive</b>.', [{ label: 'Use Demo', onClick: () => { S.mode = 'demo'; saveS(); drive = makeDrive(); render(); } }], 12000);
+      else errToast(e);
+      render();
+    }
   }
 
   function renderSetup() {

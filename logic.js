@@ -203,7 +203,17 @@
     const usedContent = meaningless && !!text;
     const basis = meaningless ? text : name + ' ' + text.slice(0, 1500);
     const cls = classify(meaningless ? '' : name, meaningless ? text : text.slice(0, 1500), file.mimeType);
-    const category = cls ? cls.category : null;
+    let category = cls ? cls.category : null;
+    // Tie (e.g. "Honda service invoice" = Car or Receipts)? Prefer the type you already have a folder for.
+    if (cls) {
+      const src = (meaningless ? '' : name) + ' ' + (meaningless ? text : text.slice(0, 1500));
+      const tied = CATEGORIES.filter(c => c !== cls.category && keywordHits(src, c.keywords).hits === cls.hits);
+      if (tied.length) {
+        const best = c => Math.max(0, ...index.list.map(f => scoreFolder(f, [], c)));
+        const ranked = [cls.category].concat(tied).sort((a, b) => best(b) - best(a));
+        category = ranked[0];
+      }
+    }
     const year = findYear(name) || findYear(text.slice(0, 3000)) || (category && category.yearly ? (file.year || null) : null);
     const fileToks = contentTokens(basis);
 
