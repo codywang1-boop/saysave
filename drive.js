@@ -130,7 +130,10 @@
     async ensureToken() {
       if (!this.client) await this.init();
       if (this.token && Date.now() < this.expires) return this.token;
-      const t = await this.requestToken('');
+      let t = null;
+      // already signed in before? ask Google silently for your account — no account list
+      if (this.user && this.user.email) { try { t = await this.requestToken('none'); } catch (e) { t = null; } }
+      if (!t) t = await this.requestToken('');
       if (this.user && !this.user.email) {  // older sign-ins: learn the email once so the chooser is skipped next time
         try { const a = await this.api('/about?fields=user(displayName,emailAddress)'); this.user = { name: a.user.displayName, email: a.user.emailAddress }; store('saysave.gUser', this.user); } catch (e) {}
       }
