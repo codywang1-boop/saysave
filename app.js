@@ -149,9 +149,15 @@
         <button class="mic" id="heroMic" aria-label="Choose a file, then speak">${ICON.mic}</button>
         <h1>Scan or pick. Say where.</h1>
         <p>Say <b>“${esc(S.triggers[0] || 'Save to my Google Drive')}”</b> and SaySave finds the right folder.</p>
-        <div class="row" style="margin-top:18px">
-          <button class="btn grow" id="scanDoc">📷 Scan a document</button>
-          <button class="btn secondary grow" id="chooseFile">📄 Choose a file</button>
+        <div class="row" style="margin-top:18px;align-items:stretch">
+          <div class="grow" style="display:flex;flex-direction:column;gap:6px">
+            <button class="btn" id="scanDoc" style="min-height:52px">📷 Scan document</button>
+            <div class="small muted" style="text-align:left">Photograph paper pages. They're saved together as <b>one PDF</b>. Best for bills, forms, receipts.</div>
+          </div>
+          <div class="grow" style="display:flex;flex-direction:column;gap:6px">
+            <button class="btn secondary" id="chooseFile" style="min-height:52px">📄 Choose file</button>
+            <div class="small muted" style="text-align:left">Pick any file, or take a new <b>photo or video</b>. Saved <b>as-is</b> (JPG, MP4, PDF, Word…).</div>
+          </div>
         </div>
         <div class="drop" id="drop">…or drop files here. On Android, use <b>Share → SaySave</b> from any app.</div>
       </section>
@@ -503,7 +509,8 @@
           `<button class="btn block" data-a="done" style="margin-top:16px">Done — save ${pages.length} page${pages.length > 1 ? 's' : ''} as PDF</button>`}`
         : `<div class="empty" style="padding:30px 10px">
             <div style="font-size:44px">📷</div>
-            <p>Lay the page on a flat, well-lit surface and take a photo.<br>You can add more pages after.</p>
+            <p>Lay the page on a flat, well-lit surface and take a photo.<br>You can add more pages after. All pages are saved together as <b>one PDF</b>.</p>
+            <p class="small muted">Want to keep a regular photo or a video instead? Close this and use <b>Choose a file</b>.</p>
             <button class="btn block" data-a="add">Open camera</button>
             <button class="btn ghost block" data-a="gallery" style="margin-top:6px">Use a photo I already took</button>
           </div>`}`;
