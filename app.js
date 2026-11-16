@@ -803,6 +803,9 @@
     if (cid) cid.onchange = () => { S.clientId = cid.value.trim(); saveS(); drive = makeDrive(); render(); };
     const conn = $('#conn', v); if (conn) conn.onclick = connectGoogle;
     const disc = $('#disc', v); if (disc) disc.onclick = () => { drive.disconnect(); render(); };
+    const sw = $('#switchAcct', v); if (sw) sw.onclick = async () => {
+      try { await drive.connect(true); orgPlan = null; toast('✅ Now using ' + esc(drive.account())); render(); } catch (e) { errToast(e); }
+    };
     $$('[data-opt]', v).forEach(c => c.onchange = () => { S[c.dataset.opt] = c.checked; saveS(); });
     $('#home', v).oninput = e => { S.homePath = e.target.value.trim(); saveS(); };
     $('#homePick', v).onclick = () => { warmToken(); openPicker('New folders go inside', c => { S.homePath = c.path.join('/'); saveS(); renderSetup(); }); };

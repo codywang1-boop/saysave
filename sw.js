@@ -1,6 +1,6 @@
 /* SaySave service worker: offline app shell + receives files from the Android share sheet. */
-const CACHE = 'saysave-v1';
-const SHELL = ['./', './index.html', './styles.css', './logic.js', './drive.js', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
+const CACHE = 'saysave-v2';
+const SHELL = ['./', './index.html', './styles.css', './logic.js', './drive.js', './scan.js', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

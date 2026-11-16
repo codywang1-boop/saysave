@@ -87,6 +87,9 @@
     constructor(clientId) {
       this.isDemo = false; this.label = 'Google Drive'; this.clientId = clientId;
       this.token = null; this.expires = 0; this.user = store('saysave.gUser'); this.rootId = null; this.cache = null;
+      // reuse a still-valid token after the app is reopened (Google tokens last about 1 hour)
+      const t = store('saysave.gToken');
+      if (t && t.expires > Date.now() + 60000 && this.user) { this.token = t.token; this.expires = t.expires; }
     }
     async init() {
       if (!this.clientId) throw new Error('Add your Google OAuth Client ID in Settings first.');
@@ -100,34 +103,45 @@
       return new Promise((res, rej) => {
         this.client.callback = (r) => {
           if (r.error) return rej(new Error(r.error_description || r.error));
-          this.token = r.access_token; this.expires = Date.now() + (r.expires_in - 60) * 1000; res(this.token);
+          this.token = r.access_token; this.expires = Date.now() + (r.expires_in - 60) * 1000;
+          store('saysave.gToken', { token: this.token, expires: this.expires });
+          res(this.token);
         };
         this.client.error_callback = (e) => rej(new Error(e && e.type === 'popup_closed' ? 'Sign-in window was closed.' : 'Google sign-in failed.'));
-        this.client.requestAccessToken({ prompt });
+        const opts = { prompt };
+        // remember who signed in, so Google skips the "Choose an account" screen next time
+        if (prompt !== 'select_account' && this.user && this.user.email) opts.hint = this.user.email;
+        this.client.requestAccessToken(opts);
       });
     }
-    async connect() {
+    // first time: consent screen; switching: account chooser
+    async connect(switchAccount) {
       if (!this.client) await this.init();
-      await this.requestToken('consent');
-      const about = await this.api('/about?fields=user(displayName)');
-      this.user = { name: about.user.displayName }; store('saysave.gUser', this.user);
+      await this.requestToken(switchAccount ? 'select_account' : (this.user ? '' : 'consent'));
+      this.cache = null; this.rootId = null;
+      const about = await this.api('/about?fields=user(displayName,emailAddress)');
+      this.user = { name: about.user.displayName, email: about.user.emailAddress }; store('saysave.gUser', this.user);
       return this.user;
     }
     disconnect() {
       try { if (this.token) google.accounts.oauth2.revoke(this.token, () => {}); } catch (e) {}
-      this.token = null; this.user = null; this.cache = null; store('saysave.gUser', null);
+      this.token = null; this.user = null; this.cache = null; store('saysave.gUser', null); store('saysave.gToken', null);
     }
     async ensureToken() {
       if (!this.client) await this.init();
       if (this.token && Date.now() < this.expires) return this.token;
-      return this.requestToken('');
+      const t = await this.requestToken('');
+      if (this.user && !this.user.email) {  // older sign-ins: learn the email once so the chooser is skipped next time
+        try { const a = await this.api('/about?fields=user(displayName,emailAddress)'); this.user = { name: a.user.displayName, email: a.user.emailAddress }; store('saysave.gUser', this.user); } catch (e) {}
+      }
+      return t;
     }
     async api(path, opts, isUpload) {
       opts = opts || {};
       for (let attempt = 0; attempt < 2; attempt++) {
         const token = await this.ensureToken();
         const r = await fetch((isUpload ? UPLOAD : API) + path, { ...opts, headers: { Authorization: 'Bearer ' + token, ...(opts.headers || {}) } });
-        if (r.status === 401 && attempt === 0) { this.token = null; continue; }
+        if (r.status === 401 && attempt === 0) { this.token = null; store('saysave.gToken', null); continue; }
         if (!r.ok) {
           let msg = r.status + ' ' + r.statusText;
           try { const j = await r.json(); msg = (j.error && j.error.message) || msg; } catch (e) {}
