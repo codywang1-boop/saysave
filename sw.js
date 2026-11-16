@@ -1,5 +1,5 @@
 /* SaySave service worker: offline app shell + receives files from the Android share sheet. */
-const CACHE = 'saysave-v2';
+const CACHE = 'saysave-v3';
 const SHELL = ['./', './index.html', './styles.css', './logic.js', './drive.js', './scan.js', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -39,7 +39,8 @@ self.addEventListener('fetch', e => {
   }
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   // App shell: network first (so updates arrive), cache as fallback when offline
-  e.respondWith(fetch(e.request).then(r => {
+  // always ask the server for the newest version (skip the browser's 10-minute cache)
+  e.respondWith(fetch(e.request.url, { cache: 'no-cache', credentials: 'same-origin' }).then(r => {
     const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {});
     return r;
   }).catch(() => caches.match(e.request).then(r => r || caches.match('./index.html'))));
