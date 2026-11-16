@@ -5,11 +5,12 @@
   const $ = (s, el) => (el || document).querySelector(s);
   const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const NATIVE = !!window.SaySaveAndroid;   // running inside the SaySave Android app
   const list = s => String(s || '').split(',').map(x => x.trim()).filter(Boolean);
 
   // ---------- Settings & state ----------
   const DEFAULTS = {
-    mode: 'demo', clientId: '298247101034-012g0354ohl99thg8mg9401sb33aag6u.apps.googleusercontent.com',
+    mode: NATIVE ? 'google' : 'demo', clientId: '298247101034-012g0354ohl99thg8mg9401sb33aag6u.apps.googleusercontent.com',
     triggers: ['Save to my Google Drive', 'Find the right place'],
     shortcuts: [{ phrase: 'tax folder', path: 'Taxes/{year}', skip: false }],
     confirmWords: 'yes, ok, okay, yeah, sure, do it, save it, confirm',
@@ -41,7 +42,22 @@
   function warmToken() { if (!drive.isDemo && drive.client && !(drive.token && Date.now() < drive.expires)) drive.ensureToken().catch(() => {}); }
 
   // ---------- Speech ----------
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  // Android app: use the phone's speech recognizer through the bridge, with the same interface as the browser's
+  class NativeSR {
+    start() {
+      NativeSR.cur = this;
+      window.__nativeSpeech = (type, text) => {
+        const me = NativeSR.cur; if (!me) return;
+        if (type === 'interim' || type === 'final') me.onresult && me.onresult({ results: [Object.assign([{ transcript: text }], { isFinal: type === 'final' })] });
+        else if (type === 'error') me.onerror && me.onerror({ error: text });
+        else if (type === 'end') { NativeSR.cur = null; me.onend && me.onend(); }
+      };
+      window.SaySaveAndroid.startSpeech();
+    }
+    abort() { if (NativeSR.cur === this) { NativeSR.cur = null; window.SaySaveAndroid.stopSpeech(); } }
+    stop() { this.abort(); }
+  }
+  const SR = NATIVE ? NativeSR : (window.SpeechRecognition || window.webkitSpeechRecognition);
   let activeRec = null;
   function listen(h) {
     stopListening();
@@ -96,6 +112,13 @@
 
   // ---------- Layer helpers (sheet / modal / toast) ----------
   const layer = $('#layer');
+  const layerStack = [];
+  // Android back button: close the top sheet, else go back to the Save tab, else leave the app
+  window.__saysaveBack = () => {
+    if (layerStack.length) { layerStack[layerStack.length - 1](); return true; }
+    if (tab !== 'home') { go('home'); return true; }
+    return false;
+  };
   function openLayer(html, opts) {
     opts = opts || {};
     const wrap = document.createElement('div');
@@ -103,7 +126,8 @@
     wrap.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${opts.center ? '' : '<div class="grabber"></div>'}${html}</div>`;
     wrap.addEventListener('click', e => { if (e.target === wrap && opts.dismiss !== false) close(); });
     layer.appendChild(wrap);
-    function close() { if (wrap.parentNode) wrap.remove(); opts.onClose && opts.onClose(); }
+    function close() { const i = layerStack.indexOf(close); if (i >= 0) layerStack.splice(i, 1); if (wrap.parentNode) wrap.remove(); opts.onClose && opts.onClose(); }
+    layerStack.push(close);
     return { el: wrap.firstChild, close, wrap };
   }
   let toastTimer;
@@ -159,7 +183,7 @@
             <div class="small muted" style="text-align:left">Pick any file, or take a new <b>photo or video</b>. Saved <b>as-is</b> (JPG, MP4, PDF, Word…).</div>
           </div>
         </div>
-        <div class="drop" id="drop">…or drop files here. On Android, use <b>Share → SaySave</b> from any app.</div>
+        <div class="drop" id="drop">${NATIVE ? 'Tip: in Gmail, Files, Photos or any app, tap <b>Share → SaySave</b>.' : '…or drop files here. On Android, use <b>Share → SaySave</b> from any app.'}</div>
       </section>
       <h2>Recent filings</h2>
       <section class="card">${recent.length ? `<ul class="list">${recent.slice(0, 12).map((r, i) => `
@@ -470,7 +494,37 @@
   }
 
   // ================= SCANNER =================
+  async function nativeScan() {
+    let r;
+    try { r = await D.nativeCall('scanDocument'); } catch (e) { return errToast(e); }
+    if (r.cancelled) return;
+    if (r.error) return errToast(r.error);
+    const busyToast = () => toast('<span class="spinner" style="display:inline-block;vertical-align:middle"></span> Reading your scan…', [], 60000);
+    busyToast();
+    try {
+      const pdfBlob = await (await fetch(r.pdf.url)).blob();
+      let text = '';
+      if (S.ocr && r.pages && r.pages.length) {
+        try {
+          const canvases = [];
+          for (const pg of r.pages) {
+            const bmp = await createImageBitmap(await (await fetch(pg.url)).blob());
+            const sc = Math.min(1, 1700 / Math.max(bmp.width, bmp.height));
+            const c = document.createElement('canvas'); c.width = bmp.width * sc; c.height = bmp.height * sc;
+            c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); canvases.push(c);
+          }
+          text = await window.SaySaveScan.readText(canvases);
+        } catch (e) { text = ''; }
+      }
+      $$('.toast').forEach(t => t.remove());
+      const file = new File([pdfBlob], `Scan ${new Date().toISOString().slice(0, 10)}.pdf`, { type: 'application/pdf', lastModified: Date.now() });
+      file.ocrText = text;
+      enqueue([file]);
+    } catch (e) { $$('.toast').forEach(t => t.remove()); errToast(e); }
+  }
+
   function openScanner() {
+    if (NATIVE) return nativeScan();
     const SC = window.SaySaveScan;
     const pages = []; let busyScan = false;
     const cam = $('#camPick');
@@ -826,7 +880,7 @@
   async function connectGoogle() {
     if (D.inPreview()) return errToast(D.PREVIEW_MSG);
     if (S.mode !== 'google') { S.mode = 'google'; saveS(); drive = makeDrive(); }
-    if (!S.clientId) { go('setup'); return errToast('Paste your Google OAuth Client ID first.'); }
+    if (!S.clientId && !NATIVE) { go('setup'); return errToast('Paste your Google OAuth Client ID first.'); }
     try { if (!drive.client) await drive.init(); await drive.connect(); toast('✅ Connected to Google Drive as ' + esc(drive.account())); render(); }
     catch (e) { errToast(e); }
   }
@@ -845,7 +899,7 @@
             ${D.inPreview() ? `<div class="banner" style="margin:0"><div>ℹ️</div><div>${esc(D.PREVIEW_MSG)}</div></div>` : drive.isConnected() ? `<div class="grow small">✅ Connected as <b>${esc(drive.account())}</b></div><button class="btn ghost sm" id="disc">Disconnect</button>` : `<button class="btn block" id="conn">Connect Google Drive</button>`}
           </div>
           <p class="muted small" style="margin:10px 0 0">Google will ask you to choose your account and tap <b>Allow</b>. SaySave only saves and moves files you tell it to.</p>
-          <details style="margin-top:14px"><summary class="small" style="cursor:pointer;font-weight:650;color:var(--ink-3)">Advanced (developer settings)</summary>
+          <details style="margin-top:14px;${NATIVE ? 'display:none' : ''}"><summary class="small" style="cursor:pointer;font-weight:650;color:var(--ink-3)">Advanced (developer settings)</summary>
           <label class="field" style="margin-top:8px">Google OAuth Client ID<input type="text" id="cid" value="${esc(S.clientId)}" placeholder="1234-abc.apps.googleusercontent.com"></label>
             <p class="small" style="margin-bottom:0"><b>How to make your own Client ID</b></p>
             <ol class="steps small">
@@ -878,11 +932,11 @@
       <section class="card">${ruleKeys.length ? `<ul class="list">${ruleKeys.map(k => `<li><div class="grow"><b>${esc(catName(k))}</b><div class="muted small">→ ${esc(pathText(rules[k]))}</div></div><button class="btn ghost sm" data-rdel="${esc(k)}">Forget</button></li>`).join('')}</ul>`
         : '<div class="empty">When you move a type of file to a different folder twice, SaySave remembers it here.</div>'}</section>
 
-      <h2>Install on your phone</h2>
+      ${NATIVE ? '' : `<h2>Install on your phone</h2>
       <section class="card small">
         <p style="margin-top:0"><b>Android (Chrome):</b> open SaySave → ⋮ menu → <b>Install app</b>. Then in any app, tap <b>Share → SaySave</b>.</p>
         <p style="margin-bottom:0"><b>iPhone (Safari):</b> Share → <b>Add to Home Screen</b>. iPhone doesn't let web apps appear in the Share menu, so open SaySave and tap <b>Choose a file</b>, which can pick from Files, Photos, and iCloud.</p>
-      </section>
+      </section>`}
 
       <h2>Privacy</h2>
       <section class="card small muted">Files go straight from your phone to your own Google Drive. SaySave has no server, and your documents are never sent anywhere else. Settings stay on this device.</section>`;
@@ -928,13 +982,27 @@
     else toast('Nothing was shared — try sharing the file again.');
   }
 
-  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  if (!NATIVE && 'serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
     // when a new version takes over, reload once so the new screens appear
     let reloaded = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded) { reloaded = true; location.reload(); } });
   }
 
+  // Android Share menu → files arrive here
+  window.SaySaveReceive = async (items) => {
+    const out = [];
+    for (const it of items || []) {
+      try { const b = await (await fetch(it.url)).blob(); out.push(new File([b], it.name || 'shared-file', { type: it.type || b.type })); } catch (e) {}
+    }
+    if (out.length) enqueue(out); else toast('Could not open the shared file.');
+  };
+
   render();
   checkShared();
+  // Android: connect to Google Drive with the phone's account automatically (one "Allow" the first time only)
+  if (NATIVE && S.mode === 'google') {
+    if (!drive.isConnected()) setTimeout(() => connectGoogle(), 400);
+    else drive.ensureToken().catch(() => {});
+  }
 })();

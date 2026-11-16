@@ -64,6 +64,14 @@
     folderLink() { return null; }
   }
 
+  // ---------------- Android bridge ----------------
+  const NATIVE = !!root.SaySaveAndroid;
+  const nativeWaits = {};
+  root.__nativeCb = (id, result) => { const w = nativeWaits[id]; if (w) { delete nativeWaits[id]; w(result || {}); } };
+  function nativeCall(method, ...args) {
+    return new Promise(res => { const id = 'n' + Date.now() + Math.random().toString(36).slice(2, 6); nativeWaits[id] = res; root.SaySaveAndroid[method](id, ...args); });
+  }
+
   // ---------------- Google ----------------
   const API = 'https://www.googleapis.com/drive/v3';
   const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
@@ -92,6 +100,7 @@
       if (t && t.expires > Date.now() + 60000 && this.user) { this.token = t.token; this.expires = t.expires; }
     }
     async init() {
+      if (NATIVE) { this.native = true; this.client = { native: true }; return true; }   // phone's own Google sign-in
       if (!this.clientId) throw new Error('Add your Google OAuth Client ID in Settings first.');
       await loadGoogle();
       this.client = google.accounts.oauth2.initTokenClient({ client_id: this.clientId, scope: SCOPE, callback: () => {} });
@@ -100,6 +109,15 @@
     isConnected() { return !!this.user; }
     account() { return this.user ? this.user.name : 'Not connected'; }
     requestToken(prompt) {
+      if (this.native) {
+        const mode = prompt === 'select_account' ? 'switch' : prompt === 'none' ? 'silent' : 'interactive';
+        return nativeCall('getToken', mode).then(r => {
+          if (!r.token) throw new Error(r.error || 'Google sign-in was cancelled.');
+          this.token = r.token; this.expires = Date.now() + 50 * 60 * 1000;
+          store('saysave.gToken', { token: this.token, expires: this.expires });
+          return this.token;
+        });
+      }
       return new Promise((res, rej) => {
         this.client.callback = (r) => {
           if (r.error) return rej(new Error(r.error_description || r.error));
@@ -121,10 +139,12 @@
       this.cache = null; this.rootId = null;
       const about = await this.api('/about?fields=user(displayName,emailAddress)');
       this.user = { name: about.user.displayName, email: about.user.emailAddress }; store('saysave.gUser', this.user);
+      if (this.native) try { root.SaySaveAndroid.rememberAccount(this.user.email); } catch (e) {}
       return this.user;
     }
     disconnect() {
-      try { if (this.token) google.accounts.oauth2.revoke(this.token, () => {}); } catch (e) {}
+      if (this.native) { try { root.SaySaveAndroid.signOut(); } catch (e) {} }
+      else try { if (this.token) google.accounts.oauth2.revoke(this.token, () => {}); } catch (e) {}
       this.token = null; this.user = null; this.cache = null; store('saysave.gUser', null); store('saysave.gToken', null);
     }
     async ensureToken() {
@@ -132,7 +152,7 @@
       if (this.token && Date.now() < this.expires) return this.token;
       let t = null;
       // already signed in before? ask Google silently for your account — no account list
-      if (this.user && this.user.email) { try { t = await this.requestToken('none'); } catch (e) { t = null; } }
+      if ((this.user && this.user.email) || this.native) { try { t = await this.requestToken('none'); } catch (e) { t = null; } }
       if (!t) t = await this.requestToken('');
       if (this.user && !this.user.email) {  // older sign-ins: learn the email once so the chooser is skipped next time
         try { const a = await this.api('/about?fields=user(displayName,emailAddress)'); this.user = { name: a.user.displayName, email: a.user.emailAddress }; store('saysave.gUser', this.user); } catch (e) {}
@@ -234,5 +254,5 @@
     folderLink(id) { return 'https://drive.google.com/drive/folders/' + id; }
   }
 
-  root.SaySaveDrive = { DemoDrive, GoogleDrive, store, inPreview, PREVIEW_MSG };
+  root.SaySaveDrive = { DemoDrive, GoogleDrive, store, inPreview, PREVIEW_MSG, NATIVE, nativeCall };
 })(this);
