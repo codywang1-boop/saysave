@@ -14,7 +14,7 @@
     shortcuts: [{ phrase: 'tax folder', path: 'Taxes/{year}', skip: false }],
     confirmWords: 'yes, ok, okay, yeah, sure, do it, save it, confirm',
     cancelWords: 'cancel, no, stop, never mind',
-    rename: true, autoCreate: false, autoListen: true, speak: false, readContent: true, autoSuggest: true, homePath: ''
+    rename: true, autoCreate: false, autoListen: true, speak: false, readContent: true, autoSuggest: true, ocr: true, scanMode: 'doc', homePath: ''
   };
   let S = Object.assign({}, DEFAULTS, D.store('saysave.settings') || {});
   if (!S.clientId) S.clientId = DEFAULTS.clientId;
@@ -147,9 +147,12 @@
       ${needConnect ? `<div class="banner"><div>🔗</div><div class="grow"><b>Google Drive isn't connected yet.</b></div><button class="btn sm" id="connectNow">Connect</button></div>` : ''}
       <section class="card hero">
         <button class="mic" id="heroMic" aria-label="Choose a file, then speak">${ICON.mic}</button>
-        <h1>Pick a file. Say where.</h1>
+        <h1>Scan or pick. Say where.</h1>
         <p>Say <b>“${esc(S.triggers[0] || 'Save to my Google Drive')}”</b> and SaySave finds the right folder.</p>
-        <button class="btn block" id="chooseFile" style="margin-top:18px">Choose a file to save</button>
+        <div class="row" style="margin-top:18px">
+          <button class="btn grow" id="scanDoc">📷 Scan a document</button>
+          <button class="btn secondary grow" id="chooseFile">📄 Choose a file</button>
+        </div>
         <div class="drop" id="drop">…or drop files here. On Android, use <b>Share → SaySave</b> from any app.</div>
       </section>
       <h2>Recent filings</h2>
@@ -163,6 +166,7 @@
     const cn = $('#connectNow', v); if (cn) cn.onclick = connectGoogle;
     const ug = $('#useGoogle', v); if (ug) ug.onclick = () => { S.mode = 'google'; saveS(); drive = makeDrive(); connectGoogle(); };
     $('#chooseFile', v).onclick = () => { warmToken(); $('#filePick').click(); };
+    $('#scanDoc', v).onclick = () => { warmToken(); openScanner(); };
     $('#heroMic', v).onclick = () => { warmToken(); $('#filePick').click(); };
     const drop = $('#drop', v);
     drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
@@ -212,7 +216,8 @@
     const box = $('#fs', sh.el);
     let textPromise = null;
     function getText() {
-      if (!textPromise) textPromise = (S.readContent && L.isMeaninglessName(file.name)) ? readText(file) : Promise.resolve('');
+      if (!textPromise) textPromise = file.ocrText != null ? Promise.resolve(file.ocrText)
+        : (S.readContent && L.isMeaninglessName(file.name)) ? readText(file) : Promise.resolve('');
       return textPromise;
     }
     getText();
@@ -456,6 +461,85 @@
     draw();
     if (S.autoSuggest && (drive.isDemo || drive.isConnected())) autoSuggest();
     else if (S.autoListen && SR) startListening();
+  }
+
+  // ================= SCANNER =================
+  function openScanner() {
+    const SC = window.SaySaveScan;
+    const pages = []; let busyScan = false;
+    const cam = $('#camPick');
+    const sh = openLayer('<div id="sc"></div>', { onClose: () => { cam.onchange = null; } });
+    const box = $('#sc', sh.el);
+    cam.onchange = async e => {
+      const f = e.target.files && e.target.files[0]; e.target.value = '';
+      if (!f) return;
+      try { const img = await SC.loadImage(f); pages.push({ img, rot: 0, mode: S.scanMode, thumb: null }); draw(); }
+      catch (err) { errToast('Could not open that photo.'); }
+    };
+    function thumb(pg) {
+      if (pg.thumb && pg.thumbKey === pg.rot + pg.mode) return pg.thumb;
+      const c = SC.render(pg); const t = document.createElement('canvas');
+      const s = 220 / Math.max(c.width, c.height); t.width = c.width * s; t.height = c.height * s;
+      t.getContext('2d').drawImage(c, 0, 0, t.width, t.height);
+      pg.thumb = t.toDataURL('image/jpeg', 0.7); pg.thumbKey = pg.rot + pg.mode; return pg.thumb;
+    }
+    function draw(status) {
+      box.innerHTML = `
+        <div class="sheet-h"><h3>Scan a document</h3><button class="x" data-a="close">✕</button></div>
+        ${pages.length ? `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+          ${pages.map((pg, i) => `<div style="position:relative;background:var(--bg);border-radius:12px;padding:6px;text-align:center">
+            <img src="${thumb(pg)}" alt="Page ${i + 1}" style="max-width:100%;max-height:150px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.15)">
+            <div class="small muted">Page ${i + 1}</div>
+            <div class="row" style="justify-content:center;gap:4px">
+              <button class="btn ghost sm" data-rot="${i}" aria-label="Rotate page ${i + 1}">↻</button>
+              ${i > 0 ? `<button class="btn ghost sm" data-up="${i}" aria-label="Move page ${i + 1} earlier">←</button>` : ''}
+              <button class="btn ghost sm" data-del="${i}" aria-label="Remove page ${i + 1}" style="color:var(--danger)">✕</button>
+            </div></div>`).join('')}
+          <button class="choice" data-a="add" style="justify-content:center;flex-direction:column;min-height:150px;margin:0"><span style="font-size:28px">＋</span><span class="small">Add page</span></button>
+        </div>
+        <div class="row" style="margin-top:14px;gap:6px">${[['doc', 'Document'], ['gray', 'Gray'], ['color', 'Color']].map(([m, l]) =>
+          `<button class="chip ${pages[0].mode === m ? 'primary' : ''}" data-mode="${m}">${l}</button>`).join('')}</div>
+        ${status ? `<div class="row" style="margin-top:16px"><div class="spinner"></div><div class="small">${status}</div></div>` :
+          `<button class="btn block" data-a="done" style="margin-top:16px">Done — save ${pages.length} page${pages.length > 1 ? 's' : ''} as PDF</button>`}`
+        : `<div class="empty" style="padding:30px 10px">
+            <div style="font-size:44px">📷</div>
+            <p>Lay the page on a flat, well-lit surface and take a photo.<br>You can add more pages after.</p>
+            <button class="btn block" data-a="add">Open camera</button>
+            <button class="btn ghost block" data-a="gallery" style="margin-top:6px">Use a photo I already took</button>
+          </div>`}`;
+      $('[data-a=close]', box).onclick = sh.close;
+      $$('[data-a=add]', box).forEach(b => b.onclick = () => { cam.setAttribute('capture', 'environment'); cam.click(); });
+      const gal = $('[data-a=gallery]', box); if (gal) gal.onclick = () => { cam.removeAttribute('capture'); cam.click(); };
+      $$('[data-rot]', box).forEach(b => b.onclick = () => { pages[+b.dataset.rot].rot += 90; draw(); });
+      $$('[data-del]', box).forEach(b => b.onclick = () => { pages.splice(+b.dataset.del, 1); draw(); });
+      $$('[data-up]', box).forEach(b => b.onclick = () => { const i = +b.dataset.up; [pages[i - 1], pages[i]] = [pages[i], pages[i - 1]]; draw(); });
+      $$('[data-mode]', box).forEach(b => b.onclick = () => { S.scanMode = b.dataset.mode; saveS(); pages.forEach(p => p.mode = b.dataset.mode); draw(); });
+      const done = $('[data-a=done]', box); if (done) done.onclick = finish;
+    }
+    async function finish() {
+      if (busyScan) return; busyScan = true;
+      try {
+        draw('Making your PDF…');
+        const canvases = pages.map(p => SC.render(p));
+        const pdf = await SC.buildPdf(canvases);
+        let text = '';
+        if (S.ocr) {
+          try {
+            text = await SC.readText(canvases, (st, pr) => {
+              const label = /load|initializ/i.test(st) ? 'Getting the text reader ready (first time only)…' : 'Reading the text… ' + Math.round(pr * 100) + '%';
+              const el = $('.spinner + .small', box); if (el) el.textContent = label;
+            });
+          } catch (e) { text = ''; }
+        }
+        const d = new Date(); const stamp = d.toISOString().slice(0, 10);
+        const file = new File([pdf], `Scan ${stamp}.pdf`, { type: 'application/pdf', lastModified: Date.now() });
+        file.ocrText = text;
+        sh.close();
+        enqueue([file]);
+      } catch (e) { busyScan = false; errToast(e); draw(); }
+    }
+    draw();
+    cam.setAttribute('capture', 'environment'); cam.click();   // go straight to the camera
   }
 
   async function ensurePath(index, segs) {
@@ -773,6 +857,7 @@
       <section class="card">
         ${[['rename', 'Suggest clean file names', 'e.g. scan_0012.pdf → Insurance 2025-11-15.pdf'],
            ['autoSuggest', 'Suggest a folder as soon as a file arrives', 'SaySave checks your Drive and proposes a path right away'],
+           ['ocr', 'Read the words on scanned pages', 'Helps pick the folder and name. Downloads a text reader (~10 MB) the first time'],
            ['readContent', 'Read the document when the name is unclear', 'Reads PDFs/text on your phone only'],
            ['autoListen', 'Start listening automatically', 'Mic turns on when a file arrives'],
            ['speak', 'Speak confirmations out loud', '“Saved to Taxes”'],
