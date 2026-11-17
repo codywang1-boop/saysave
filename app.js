@@ -96,10 +96,11 @@
     else if (/(word|text|document|sheet)/i.test(type) || /^(DOC|DOCX|TXT|XLS|XLSX|CSV|RTF)$/.test(ext)) cls = 'doc';
     return `<div class="fileicon ${cls}">${esc((ext || 'FILE').slice(0, 4))}</div>`;
   }
-  function pathHtml(path, newSegs) {
+  function pathHtml(path, newSegs, catId) {
     const n = (newSegs || []).length, segs = path || [];
+    const k = catId ? 'k k-' + catKey(catId) : '';
     let h = '<div class="path"><span class="seg">My Drive</span>';
-    segs.forEach((s, i) => { h += `<span class="sep">›</span><span class="seg ${i >= segs.length - n ? 'new' : ''}">${esc(s)}</span>`; });
+    segs.forEach((s, i) => { const isNew = i >= segs.length - n; h += `<span class="sep">›</span><span class="seg ${isNew ? 'new' : (i === segs.length - 1 ? k : '')}">${i === segs.length - 1 && catId && !isNew ? ico(catKey(catId)).replace('<svg', '<svg style="width:15px;height:15px;vertical-align:-2px;margin-right:4px"') : ''}${esc(s)}</span>`; });
     return h + '</div>';
   }
   const pathText = p => ['My Drive'].concat(p || []).join(' › ');
@@ -162,6 +163,20 @@
     ({ home: renderHome, commands: renderCommands, organize: renderOrganize, setup: renderSetup })[tab]();
   }
 
+  const TILE_ICON = {
+    taxes: '<path d="M7 3h10v18l-2-1.5L13 21l-2-1.5L9 21l-2-1.5L5 21V3z" transform="translate(1 0)"/><path d="M10 9l4 0M10 13h4"/>',
+    medical: '<path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z"/>',
+    car: '<path d="M5 16h14v-4l-2-5H7l-2 5zM5 16v2M19 16v2"/><circle cx="8" cy="14" r="1"/><circle cx="16" cy="14" r="1"/>',
+    home: '<path d="M4 11l8-7 8 7v9H4z"/><path d="M10 20v-6h4v6"/>',
+    training: '<circle cx="12" cy="9" r="5"/><path d="M9 13l-1 8 4-2 4 2-1-8"/>',
+    receipts: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+    other: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'
+  };
+  const ico = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${TILE_ICON[k] || TILE_ICON.other}</svg>`;
+  const TILE_DEFS = [['taxes', 'Taxes'], ['medical', 'Medical'], ['car', 'Car'], ['home', 'Home'], ['training', 'Training'], ['receipts', 'Receipts']];
+  const catKey = id => ({ bills: 'bills', bank: 'bank', insurance: 'insurance', work: 'work', school: 'school', id: 'id', photos: 'photos', taxes: 'taxes', medical: 'medical', car: 'car', home: 'home', training: 'training', receipts: 'receipts' }[id] || 'other');
+  let tileHint = null;
+
   // ================= HOME =================
   function renderHome() {
     const v = $('#view');
@@ -184,7 +199,9 @@
             <div class="small muted" style="text-align:left">Pick any file, or take a new <b>photo or video</b>. Saved <b>as-is</b> (JPG, MP4, PDF, Word…).</div>
           </div>
         </div>
-        <div class="drop" id="drop">${NATIVE ? 'Tip: in Gmail, Files, Photos or any app, tap <b>Share → SaySave</b>.' : '…or drop files here. On Android, use <b>Share → SaySave</b> from any app.'}</div>
+        <div class="tiles" aria-label="Quick save into a folder type">${TILE_DEFS.map(([k, l]) => `<button class="tile k-${k}" data-tile="${k}" data-label="${l}">${ico(k)}${l}</button>`).join('')}</div>
+        <div class="small muted" style="margin-top:8px">Tap a type to save straight into that folder, or let SaySave pick from all your folders.</div>
+        <div class="drop" id="drop" style="margin-top:14px">${NATIVE ? 'Tip: in Gmail, Files, Photos or any app, tap <b>Share → SaySave</b>.' : '…or drop files here. On Android, use <b>Share → SaySave</b> from any app.'}</div>
       </section>
       <h2>Recent filings</h2>
       <section class="card">${recent.length ? `<ul class="list">${recent.slice(0, 12).map((r, i) => `
@@ -199,6 +216,7 @@
     const ug = $('#useGoogle', v); if (ug) ug.onclick = () => { S.mode = 'google'; saveS(); drive = makeDrive(); connectGoogle(); };
     $('#chooseFile', v).onclick = () => { warmToken(); $('#filePick').click(); };
     $('#scanDoc', v).onclick = () => { warmToken(); openScanner(); };
+    $$('[data-tile]', v).forEach(b => b.onclick = () => { warmToken(); tileHint = b.dataset.label; $('#filePick').click(); });
     $('#heroMic', v).onclick = () => { warmToken(); $('#filePick').click(); };
     const drop = $('#drop', v);
     drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
@@ -207,7 +225,11 @@
     $$('[data-undo]', v).forEach(b => b.onclick = () => undoSave(+b.dataset.undo));
   }
 
-  $('#filePick').onchange = e => { enqueue(Array.from(e.target.files)); e.target.value = ''; };
+  $('#filePick').onchange = e => {
+    const fs = Array.from(e.target.files); if (tileHint) fs.forEach(f => { f.hint = tileHint; }); tileHint = null;
+    enqueue(fs); e.target.value = '';
+  };
+  window.addEventListener('focus', () => setTimeout(() => { tileHint = null; }, 1500));
 
   async function undoSave(i) {
     const r = recent[i]; if (!r) return;
@@ -367,7 +389,7 @@
       const f = index.findByPath(segs);
       const s = L.suggest(index, { name: file.name, text, mimeType: file.type }, {});
       const name = baseName(s.suggestedName);
-      if (f) return { kind: 'existing', choices: [{ folderId: f.id, path: index.pathOf(f.id) }], sel: 0, name, reason: `Shortcut “${esc(sc.phrase)}”.`, skip: !!sc.skip };
+      if (f) return { kind: 'existing', choices: [{ folderId: f.id, path: index.pathOf(f.id) }], sel: 0, name, reason: `Shortcut “${esc(sc.phrase)}”.`, skip: !!sc.skip, categoryId: s.categoryId };
       const p = resolveNew(index, segs);
       return { kind: 'new', proposal: p, editPath: p.path.join('/'), name, reason: `Shortcut “${esc(sc.phrase)}” — that folder doesn't exist yet.` };
     }
@@ -381,7 +403,7 @@
           const sub = s.year ? index.childNamed(h.folderId, String(s.year)) : null;
           return sub ? { folderId: sub.id, path: index.pathOf(sub.id) } : { folderId: h.folderId, path: h.path };
         });
-        return { kind: 'existing', choices, sel: 0, name, reason: `You said “${esc(query)}”.` };
+        return { kind: 'existing', choices, sel: 0, name, reason: `You said “${esc(query)}”.`, categoryId: s.categoryId };
       }
       const title = query.replace(/\b\w/g, c => c.toUpperCase());
       const p = resolveNew(index, [title]);
@@ -399,8 +421,8 @@
         const c = p.choices;
         where = (p.suggested ? `<div style="margin:14px 0 2px;font-weight:700">${c.length > 1 ? 'Suggested folders' : 'Suggested folder'}</div>` : '') +
           `<div class="muted small" style="margin:${p.suggested ? '0' : '14px'} 0 8px">${p.reason || ''}${p.suggested ? ' Not right? Say another folder, or tap Change folder.' : ''}</div>` +
-          (c.length > 1 ? c.map((x, i) => `<button class="choice ${i === p.sel ? 'sel' : ''}" data-sel="${i}"><input type="radio" ${i === p.sel ? 'checked' : ''} tabindex="-1">${pathHtml(x.path)}</button>`).join('')
-            : pathHtml(c[0].path)) +
+          (c.length > 1 ? c.map((x, i) => `<button class="choice ${i === p.sel ? 'sel' : ''}" data-sel="${i}"><input type="radio" ${i === p.sel ? 'checked' : ''} tabindex="-1">${pathHtml(x.path, null, p.categoryId)}</button>`).join('')
+            : pathHtml(c[0].path, null, p.categoryId)) +
           (p.yearProposal ? `<button class="btn ghost sm" data-a="yearSub" style="margin-top:6px">+ Put it in a new “${esc(p.yearProposal.newSegments[0])}” subfolder</button>` : '');
       }
       return `${where}
@@ -491,7 +513,8 @@
     }
 
     draw();
-    if (S.autoSuggest && (drive.isDemo || drive.isConnected())) autoSuggest();
+    if (file.hint && (drive.isDemo || drive.isConnected())) handle('save this to my ' + file.hint + ' folder');
+    else if (S.autoSuggest && (drive.isDemo || drive.isConnected())) autoSuggest();
     else if (S.autoListen && SR) startListening();
   }
 

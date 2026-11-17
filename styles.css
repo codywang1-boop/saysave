@@ -1,28 +1,28 @@
 :root {
-  --bg: #f4f5fb;
+  --bg: #f5f3ff;
   --card: #ffffff;
-  --ink: #161a33;
-  --ink-2: #4a5072;
-  --ink-3: #8a90ad;
-  --line: #e3e5f0;
-  --brand: #3b3fd8;
-  --brand-2: #5b5ff0;
-  --brand-soft: #eceeff;
-  --accent: #10b39a;
-  --accent-soft: #e2f7f3;
-  --warn: #d9822b;
-  --warn-soft: #fff3e4;
-  --danger: #d64545;
-  --radius: 18px;
-  --shadow: 0 6px 24px rgba(30, 34, 90, .08), 0 1px 3px rgba(30, 34, 90, .06);
+  --ink: #1e1446;
+  --ink-2: #4b4370;
+  --ink-3: #8a84aa;
+  --line: #e6e1fb;
+  --brand: #6d4aff;
+  --brand-2: #8b6dff;
+  --brand-soft: #ece7ff;
+  --accent: #12a372;
+  --accent-soft: #d9f7e8;
+  --warn: #c77700;
+  --warn-soft: #fff0cc;
+  --danger: #d6455d;
+  --radius: 20px;
+  --shadow: 0 8px 28px rgba(80, 50, 200, .10), 0 1px 3px rgba(80, 50, 200, .08);
   --font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f1120; --card: #191c31; --ink: #eef0ff; --ink-2: #b8bcda; --ink-3: #7f84a6;
-    --line: #2a2e4a; --brand: #7c80ff; --brand-2: #9a9dff; --brand-soft: #262a52;
-    --accent: #2dd4b6; --accent-soft: #15362f; --warn: #f0a75a; --warn-soft: #3a2a17;
-    --shadow: 0 6px 24px rgba(0,0,0,.35);
+    --bg: #120d2b; --card: #1d1640; --ink: #f1edff; --ink-2: #c4bce8; --ink-3: #8a82b4;
+    --line: #2f2760; --brand: #9b82ff; --brand-2: #b5a2ff; --brand-soft: #2e2463;
+    --accent: #3dd6a0; --accent-soft: #123d30; --warn: #ffc24d; --warn-soft: #3d2e0d;
+    --shadow: 0 8px 28px rgba(0,0,0,.4);
   }
 }
 * { box-sizing: border-box; }
@@ -189,3 +189,35 @@ code { background: var(--bg); padding: 2px 6px; border-radius: 6px; font-size: 1
 .spinner { width: 20px; height: 20px; border: 3px solid var(--brand-soft); border-top-color: var(--brand); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .hidden { display: none !important; }
+
+/* Style C: colored folder types */
+.hero { background: var(--card); }
+.mic { background: var(--brand); box-shadow: 0 10px 30px rgba(109,74,255,.35); }
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 16px; }
+.tile { border: 0; border-radius: 14px; padding: 10px 4px 9px; font-size: 12.5px; font-weight: 650; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.tile svg { width: 22px; height: 22px; }
+.k-taxes { background: #d9f7e8; color: #0b5a37; } .k-medical { background: #ffe1e6; color: #8a1730; }
+.k-car { background: #ddeaff; color: #163e8a; } .k-home { background: #fff0cc; color: #6b4700; }
+.k-training { background: #efe3ff; color: #4b1d8a; } .k-receipts { background: #e0f6fb; color: #0d5566; }
+.k-bills { background: #fde7d6; color: #7a3410; } .k-bank { background: #e3f0e0; color: #2c5a1c; }
+.k-insurance { background: #fce1f1; color: #7d1b57; } .k-work { background: #e6e8ee; color: #2f3448; }
+.k-school { background: #fff5c8; color: #5f4b00; } .k-id { background: #e4ecff; color: #22357a; }
+.k-photos { background: #def7f2; color: #0f5a4d; } .k-other { background: var(--brand-soft); color: var(--brand); }
+@media (prefers-color-scheme: dark) { .tile, .path .seg.k { filter: saturate(.9) brightness(.9); } }
+.path .seg.k { font-weight: 700; }
+.btn { border-radius: 16px; }
+
+.path .seg.k-taxes { background: #d9f7e8; color: #0b5a37; }
+.path .seg.k-medical { background: #ffe1e6; color: #8a1730; }
+.path .seg.k-car { background: #ddeaff; color: #163e8a; }
+.path .seg.k-home { background: #fff0cc; color: #6b4700; }
+.path .seg.k-training { background: #efe3ff; color: #4b1d8a; }
+.path .seg.k-receipts { background: #e0f6fb; color: #0d5566; }
+.path .seg.k-bills { background: #fde7d6; color: #7a3410; }
+.path .seg.k-bank { background: #e3f0e0; color: #2c5a1c; }
+.path .seg.k-insurance { background: #fce1f1; color: #7d1b57; }
+.path .seg.k-work { background: #e6e8ee; color: #2f3448; }
+.path .seg.k-school { background: #fff5c8; color: #5f4b00; }
+.path .seg.k-id { background: #e4ecff; color: #22357a; }
+.path .seg.k-photos { background: #def7f2; color: #0f5a4d; }
+.path .seg.k-other { background: var(--brand-soft); color: var(--brand); }
