@@ -1,5 +1,5 @@
 /* SaySave service worker: offline app shell + receives files from the Android share sheet. */
-const CACHE = 'saysave-v4';
+const CACHE = 'saysave-v5';
 const SHELL = ['./', './index.html', './styles.css', './logic.js', './drive.js', './scan.js', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
